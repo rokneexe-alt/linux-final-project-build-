@@ -1,0 +1,66 @@
+{
+  "name": "word-challenge",
+  "version": "2.1.0",
+  "description": "Word Chain Game",
+  "main": "main.js",
+  "author": {
+    "name": "roknedine",
+    "email": "roknedine@example.com"
+  },
+  "scripts": {
+    "patch": "node patch-index.js",
+    "start": "electron .",
+    "build": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --win --linux"
+  },
+  "build": {
+    "appId": "com.wordchallenge.game",
+    "productName": "Word Challenge",
+    "files": [
+      "index.html",
+      "main.js",
+      "preload.js",
+      "firebase-config.js",
+      "en_words.txt",
+      "icon.ico",
+      "icon.png",
+      "hints.js"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "pacman"
+      ],
+      "icon": "icon.png",
+      "category": "Game",
+      "maintainer": "roknedine <roknedine@example.com>",
+      "artifactName": "WordChallenge-${version}.${ext}",
+      "executableName": "word-challenge"
+    },
+    "pacman": {
+      "artifactName": "word-challenge-${version}.pkg.tar.zst",
+      "depends": [
+        "gtk3",
+        "nss",
+        "alsa-lib",
+        "libxss",
+        "libnotify",
+        "xdg-utils"
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "homepage": "https://example.com"
+}

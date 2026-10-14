@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Chain Game - Retro Neon Edition</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#050805">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Tajawal:wght@500;700;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        neon: { green: '#00FF66', greenDark: '#009933', bg: '#050805', panel: '#0B120C', border: '#1A331E' }
+                    },
+                    fontFamily: { retro: ['"Press Start 2P"', 'monospace'], arabic: ['Tajawal', 'sans-serif'] }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #050805; color: #00FF66; font-family: 'Press Start 2P', monospace; overflow: hidden; user-select: none; }
+        .scanlines { background: linear-gradient(rgba(18,16,16,0) 50%, rgba(0,0,0,.35) 50%); background-size: 100% 4px; pointer-events: none; }
+        .pixel-progress-container { border: 4px solid #00FF66; padding: 4px; background-color: #000; box-shadow: 0 0 15px rgba(0,255,102,.3); }
+        .pixel-progress-bar { height: 24px; background-color: #00FF66; width: 0%; transition: width .1s ease-out; box-shadow: inset 0 0 10px #009933; }
+        .btn-retro { background-color: #0B120C; border: 3px solid #00FF66; color: #00FF66; box-shadow: 0 0 10px rgba(0,255,102,.2), inset 0 0 5px rgba(0,255,102,.1); transition: all .15s ease-in-out; position: relative; }
+        .btn-retro:hover:not(:disabled) { background-color: #00FF66; color: #050805; box-shadow: 0 0 25px rgba(0,255,102,.8); transform: scale(1.02); }
+        .btn-retro:active:not(:disabled) { transform: scale(.98); }
+        .btn-retro:disabled { opacity: .4; cursor: not-allowed; }
+        .btn-quit { background-color: #120B0B; border: 3px solid #FF3333; color: #FF3333; box-shadow: 0 0 10px rgba(255,51,51,.2); }
+        .btn-quit:hover { background-color: #FF3333; color: #050805; box-shadow: 0 0 25px rgba(255,51,51,.8); }
+        .screen-fade { transition: opacity .3s ease-in-out, transform .3s ease-in-out; }
+        .screen-hidden { opacity: 0; pointer-events: none; transform: scale(.96); position: absolute; width: 100%; height: 100%; }
+        input[type=range] { -webkit-appearance: none; background: #0B120C; border: 2px solid #00FF66; height: 12px; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 24px; width: 16px; background: #00FF66; cursor: pointer; box-shadow: 0 0 10px #00FF66; }
+        .rtl-font { font-family: 'Tajawal', sans-serif !important; direction: rtl; }
+
+        /* ---- Game screen ---- */
+        #chatBox, #mpChat { background: #000; border: 3px solid #1A331E; scrollbar-width: thin; scrollbar-color: #00FF66 #000; }
+        .bubble { max-width: 80%; padding: 8px 12px; border: 2px solid; font-family: 'Press Start 2P', monospace; font-size: 12px; word-break: break-all; direction: ltr; text-align: left; animation: pop .2s ease-out; }
+        .bubble small { display: block; font-size: 8px; opacity: .6; margin-bottom: 4px; }
+        .bubble-player { align-self: flex-end; border-color: #00FF66; background: rgba(0,255,102,.12); }
+        .bubble-bot { align-self: flex-start; border-color: #33CCFF; color: #33CCFF; background: rgba(51,204,255,.10); }
+        .bubble-sys { align-self: center; border: 0; color: #FFCC33; font-size: 9px; text-align: center; }
+        .last-letter { color: #FFCC33; text-shadow: 0 0 8px #FFCC33; }
+        @keyframes pop { from { transform: scale(.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+        .shake { animation: shake .25s linear; border-color: #FF3333 !important; }
+        #wordInput, #mpInput, .txt-in { user-select: text; direction: ltr; text-transform: lowercase; background: #000; border: 3px solid #00FF66; color: #00FF66; font-family: 'Press Start 2P', monospace; outline: none; }
+        #wordInput:focus, #mpInput:focus, .txt-in:focus { box-shadow: 0 0 15px rgba(0,255,102,.6); }
+        #wordInput:disabled, #mpInput:disabled { opacity: .5; }
+        .timer-warn { background-color: #FF3333 !important; box-shadow: inset 0 0 10px #990000 !important; }
+    
+        /*SPLASH*/
+        .mc-splash { position: absolute; right: -14px; bottom: -36px; white-space: nowrap; direction: ltr;
+            font-family: 'Press Start 2P', monospace !important; font-style: italic; font-size: 11px; color: #FFEE33;
+            text-shadow: 2px 2px 0 #3a3300, 0 0 10px rgba(255,238,51,.7); pointer-events: none; z-index: 5;
+            transform-origin: center; animation: mcSplash .6s ease-in-out infinite; }
+        @keyframes mcSplash {
+            0%,100% { transform: rotate(-20deg) scale(1);    filter: brightness(1); }
+            50%     { transform: rotate(-20deg) scale(1.18); filter: brightness(1.5); text-shadow: 2px 2px 0 #3a3300, 0 0 18px rgba(255,238,51,1); }
+        }
+        @media (max-width: 480px) { .mc-splash { font-size: 8px; right: -6px; bottom: -30px; } }
+    </style>
+</head>
+<body class="h-screen w-screen relative flex items-center justify-center p-4">
+
+    <div id="scanlineOverlay" class="scanlines absolute inset-0 z-50"></div>
+
+    <div class="w-full max-w-xl h-full max-h-[700px] flex flex-col justify-between relative z-10">
+
+        <!-- 1. LOADING -->
+        <div id="loadingScreen" class="screen-fade w-full h-full flex flex-col justify-center items-center text-center p-6 bg-neon-panel border-4 border-neon-green rounded-lg shadow-[0_0_30px_rgba(0,255,102,0.15)]">
+            <h1 class="text-2xl sm:text-3xl text-neon-green mb-8 tracking-widest animate-pulse leading-snug">WORD CHAIN</h1>
+            <div class="w-full max-w-md px-2">
+                <div class="pixel-progress-container mb-4"><div id="progressBar" class="pixel-progress-bar"></div></div>
+                <div class="flex justify-between text-xs sm:text-sm text-neon-green/80 font-mono">
+                    <span id="loadingStatus">LOADING ENGINE...</span>
+                    <span id="loadingPercent">0%</span>
+                </div>
+            </div>
+            <p class="text-[10px] sm:text-xs text-neon-green/40 mt-12 animate-bounce">[ TIP: LAST LETTER IS YOUR STARTING CHAR ]</p>
+        </div>
+
+        <!-- 2. MAIN MENU -->
+        <div id="mainMenuScreen" class="screen-fade screen-hidden w-full h-full flex flex-col justify-between p-6 sm:p-8 bg-neon-panel border-4 border-neon-green rounded-lg shadow-[0_0_30px_rgba(0,255,102,0.15)]">
+            <div class="text-center pt-4">
+                <h1 id="menuTitle" class="text-3xl sm:text-4xl text-neon-green font-bold tracking-wider drop-shadow-[0_0_15px_rgba(0,255,102,0.8)]" style="position:relative;display:inline-block">WORD CHAIN<span class="mc-splash">by roknedine</span></h1>
+                <p id="subTitle" class="text-[11px] text-neon-green/60 mt-3 tracking-widest">JAVA EDITION</p>
+            </div>
+            <div class="flex flex-col gap-5 w-full max-w-md mx-auto my-auto">
+                <button data-i18n="single" onclick="playBtnSound(); startSingle();" class="btn-retro w-full py-4 px-6 text-sm sm:text-base text-center rounded tracking-wider">SINGLE PLAYER</button>
+                <button data-i18n="multi" onclick="playBtnSound(); openMP();" class="btn-retro w-full py-4 px-6 text-sm sm:text-base text-center rounded tracking-wider">MULTIPLAYER</button>
+                <button onclick="playBtnSound(); openSettings();" class="btn-retro w-full py-4 px-6 text-sm sm:text-base text-center rounded tracking-wider flex items-center justify-center gap-3">
+                    <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                    <span data-i18n="settings">SETTINGS</span>
+                </button>
+                <button onclick="playBtnSound(); openQuitModal();" class="btn-retro btn-quit w-full py-4 px-6 text-sm sm:text-base text-center rounded tracking-wider flex items-center justify-center gap-3">
+                    <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
+                    <span data-i18n="quit">QUIT</span>
+                </button>
+            </div>
+            <div class="text-center text-[10px] text-neon-green/40 font-mono pb-2">v2.1.0 • ONLINE READY</div>
+        </div>
+
+        <!-- 3. SETTINGS -->
+        <div id="settingsScreen" class="screen-fade screen-hidden w-full h-full flex flex-col justify-between p-6 sm:p-8 bg-neon-panel border-4 border-neon-green rounded-lg shadow-[0_0_30px_rgba(0,255,102,0.15)] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-neon-green/30 pb-3">
+                <button onclick="playBtnSound(); closeSettings();" class="btn-retro py-1 px-3 text-[10px] sm:text-xs flex items-center gap-2"><span>←</span> <span id="btnBackText">MAIN MENU</span></button>
+                <h2 data-i18n="settingsTitle" class="text-lg sm:text-xl text-neon-green font-bold tracking-wider">SETTINGS</h2>
+                <div class="w-12"></div>
+            </div>
+            <div class="flex flex-col gap-5 w-full max-w-md mx-auto my-auto text-xs sm:text-sm py-4">
+                <div class="flex flex-col gap-2 border-b border-neon-green/20 pb-3">
+                    <label id="lblLang" class="text-neon-green">LANGUAGE / اللغة</label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <button id="btnLangEn" onclick="setLanguage('en')" class="btn-retro py-2 px-3 text-center bg-neon-green text-neon-bg font-bold">ENGLISH</button>
+                        <button id="btnLangAr" onclick="setLanguage('ar')" class="btn-retro py-2 px-3 text-center opacity-60">العربية</button>
+                    </div>
+                </div>
+                <div class="flex flex-col gap-2 border-b border-neon-green/20 pb-3">
+                    <label id="lblDiff" class="text-neon-green">BOT DIFFICULTY</label>
+                    <div class="grid grid-cols-3 gap-2 text-[10px] sm:text-xs">
+                        <button id="btnDiffEasy" onclick="setDifficulty('easy')" class="btn-retro py-2 text-center opacity-60">EASY</button>
+                        <button id="btnDiffMed" onclick="setDifficulty('medium')" class="btn-retro py-2 text-center bg-neon-green text-neon-bg font-bold">MEDIUM</button>
+                        <button id="btnDiffHard" onclick="setDifficulty('hard')" class="btn-retro py-2 text-center opacity-60">HARD</button>
+                    </div>
+                </div>
+                <div class="flex flex-col gap-2 border-b border-neon-green/20 pb-3">
+                    <div class="flex justify-between"><label id="lblVol" class="text-neon-green">SFX VOLUME</label><span id="volVal" class="text-neon-green">80%</span></div>
+                    <input type="range" id="volSlider" min="0" max="100" value="80" oninput="updateVolume(this.value)" class="w-full">
+                </div>
+                <div class="flex flex-col gap-2 border-b border-neon-green/20 pb-3">
+                    <label id="lblTimer" class="text-neon-green">TURN TIMER</label>
+                    <div class="grid grid-cols-3 gap-2 text-[10px] sm:text-xs">
+                        <button id="btnTimer10" onclick="setTimer(10)" class="btn-retro py-2 text-center opacity-60">10s</button>
+                        <button id="btnTimer15" onclick="setTimer(15)" class="btn-retro py-2 text-center bg-neon-green text-neon-bg font-bold">15s</button>
+                        <button id="btnTimer20" onclick="setTimer(20)" class="btn-retro py-2 text-center opacity-60">20s</button>
+                    </div>
+                </div>
+                <div class="flex justify-between items-center py-1">
+                    <label id="lblMatrix" class="text-neon-green">SCANLINES FX</label>
+                    <button id="btnMatrixToggle" onclick="toggleMatrix()" class="btn-retro py-1 px-4 text-xs">ON</button>
+                </div>
+            </div>
+            <div class="pt-2">
+                <button id="btnSaveBack" onclick="playBtnSound(); saveSettingsAndExit();" class="btn-retro w-full py-3 text-center text-sm font-bold bg-neon-green text-neon-bg">SAVE & BACK</button>
+            </div>
+        </div>
+
+        <!-- 3b. SINGLE PLAYER GAME -->
+        <div id="gameScreen" class="screen-fade screen-hidden w-full h-full flex flex-col gap-3 p-4 sm:p-6 bg-neon-panel border-4 border-neon-green rounded-lg shadow-[0_0_30px_rgba(0,255,102,0.15)]">
+
+            <!-- Top bar -->
+            <div class="flex items-center justify-between gap-2">
+                <button onclick="playBtnSound(); leaveGame();" class="btn-retro py-1 px-3 text-[10px] sm:text-xs flex items-center gap-2"><span>←</span><span data-i18n="btnBackText">MAIN MENU</span></button>
+                <span id="diffBadge" class="text-[10px] text-neon-green/60">MEDIUM</span>
+            </div>
+
+            <!-- Scores -->
+            <div class="grid grid-cols-2 gap-3 text-center text-[10px] sm:text-xs">
+                <div class="border-2 border-neon-green p-2">
+                    <div data-i18n="you" class="text-neon-green/70 mb-2">YOU</div>
+                    <div id="scorePlayer" class="text-lg text-neon-green">0</div>
+                    <div id="comboBadge" class="text-[9px] mt-1 h-3" style="color:#FFCC33;"></div>
+                </div>
+                <div class="border-2 p-2" style="border-color:#33CCFF;">
+                    <div data-i18n="bot" class="mb-2" style="color:#33CCFF99;">BOT</div>
+                    <div id="scoreBot" class="text-lg" style="color:#33CCFF;">0</div>
+                </div>
+            </div>
+
+            <!-- Timer -->
+            <div>
+                <div class="flex justify-between text-[10px] mb-1">
+                    <span id="turnLabel" class="text-neon-green/80">YOUR TURN</span>
+                    <span id="timerText">15s</span>
+                </div>
+                <div class="pixel-progress-container" style="padding:3px;border-width:3px;">
+                    <div id="timerBar" class="pixel-progress-bar" style="height:14px;width:100%;transition:width .1s linear;"></div>
+                </div>
+            </div>
+
+            <!-- Words box -->
+            <div id="chatBox" class="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-2" dir="ltr"></div>
+
+            <!-- Hint -->
+            <div id="hintLine" class="text-[10px] text-center text-neon-green/70 min-h-[14px]"></div>
+
+            <!-- Dictionary fallback -->
+            <div id="dictFallback" class="hidden text-center text-[10px] text-red-400">
+                <p data-i18n="dictMissing" class="mb-2 font-mono">en_words.txt not found</p>
+                <label class="btn-retro inline-block py-2 px-3 cursor-pointer" data-i18n="pickFile">CHOOSE en_words.txt</label>
+                <input id="dictPicker" type="file" accept=".txt,text/plain" class="hidden">
+            </div>
+
+            <!-- Input -->
+            <div class="flex gap-2">
+                <input id="wordInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="30"
+                       class="flex-1 min-w-0 py-3 px-3 text-xs sm:text-sm" placeholder="type a word...">
+                <button id="sendBtn" onclick="submitWord()" class="btn-retro py-3 px-4 text-xs" data-i18n="send">SEND</button>
+            </div>
+        </div>
+
+        <!-- MULTIPLAYER MENU -->
+        <div id="mpMenuScreen" class="screen-fade screen-hidden w-full h-full flex flex-col justify-between p-6 sm:p-8 bg-neon-panel border-4 border-neon-green rounded-lg shadow-[0_0_30px_rgba(0,255,102,0.15)]">
+            <div class="flex items-center justify-between border-b border-neon-green/30 pb-3">
+                <button onclick="playBtnSound(); switchScreen('mpMenuScreen','mainMenuScreen');" class="btn-retro py-1 px-3 text-[10px] sm:text-xs flex items-center gap-2"><span>←</span><span data-i18n="btnBackText">MAIN MENU</span></button>
+                <h2 data-i18n="multi" class="text-lg sm:text-xl text-neon-green font-bold tracking-wider">MULTIPLAYER</h2>
+                <div class="w-12"></div>
+            </div>
+            <div class="flex flex-col gap-5 w-full max-w-md mx-auto my-auto text-xs sm:text-sm">
+                <input id="mpName" maxlength="12" autocomplete="off" class="txt-in py-3 px-3 text-xs" style="text-transform:none" placeholder="Your name">
+                <button data-i18n="mpCreate" onclick="playBtnSound(); mpEnter('create');" class="btn-retro w-full py-3 text-sm">CREATE ROOM</button>
+                <div class="flex gap-2">
+                    <input id="mpCode" maxlength="4" autocomplete="off" class="txt-in flex-1 min-w-0 py-3 px-3 text-xs" style="text-transform:uppercase" placeholder="CODE">
+                    <button data-i18n="mpJoin" onclick="playBtnSound(); mpEnter('join', { room: $('mpCode').value.trim() });" class="btn-retro py-3 px-4 text-xs">JOIN</button>
+                </div>
+                <p id="mpErr" class="text-red-400 text-[10px] text-center min-h-[14px]"></p>
+            </div>
+            <div></div>
+        </div>
+
+        <!-- MULTIPLAYER ROOM -->
+        <div id="mpScreen" class="screen-fade screen-hidden w-full h-full flex flex-col gap-3 p-4 sm:p-6 bg-neon-panel border-4 border-neon-green rounded-lg shadow-[0_0_30px_rgba(0,255,102,0.15)]">
+            <div class="flex items-center justify-between gap-2">
+                <button onclick="playBtnSound(); mpLeave();" class="btn-retro py-1 px-3 text-[10px] sm:text-xs flex items-center gap-2"><span>←</span><span data-i18n="btnBackText">MAIN MENU</span></button>
+                <span class="text-[10px]"><span data-i18n="roomCode">ROOM</span> <span id="mpRoomCode" class="last-letter text-base">----</span></span>
+            </div>
+            <div id="mpLobby" class="flex-1 min-h-0 flex flex-col gap-3">
+                <div data-i18n="mpPlayers" class="text-xs text-center text-neon-green/70">PLAYERS</div>
+                <div id="mpList" class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2"></div>
+                <p id="mpWait" class="text-[10px] text-center text-neon-green/70 min-h-[14px]"></p>
+                <button id="mpStartBtn" data-i18n="mpStart" onclick="playBtnSound(); mpStart();" class="btn-retro py-3 text-sm font-bold">START GAME</button>
+            </div>
+            <div id="mpPlay" class="hidden flex-1 min-h-0 flex flex-col gap-3">
+                <div id="mpScores" class="grid grid-cols-2 gap-2 text-center text-[10px]"></div>
+                <div>
+                    <div class="flex justify-between text-[10px] mb-1"><span id="mpTurnLabel" class="text-neon-green/80"></span><span id="mpTimerText">15s</span></div>
+                    <div class="pixel-progress-container" style="padding:3px;border-width:3px;"><div id="mpTimerBar" class="pixel-progress-bar" style="height:14px;width:100%;transition:width .1s linear;"></div></div>
+                </div>
+                <div id="mpChat" class="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-2" dir="ltr"></div>
+                <div id="mpHint" class="text-[10px] text-center text-neon-green/70 min-h-[14px]"></div>
+                <div id="mpInputRow" class="flex gap-2">
+                    <input id="mpInput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="30" class="flex-1 min-w-0 py-3 px-3 text-xs sm:text-sm" placeholder="type a word...">
+                    <button id="mpSend" onclick="mpSubmit()" class="btn-retro py-3 px-4 text-xs" data-i18n="send">SEND</button>
+                </div>
+                <div id="mpOver" class="hidden text-center border-2 border-neon-green p-3"></div>
+            </div>
+        </div>
+
+        <!-- GAME OVER MODAL -->
+        <div id="gameOverModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <div class="w-full max-w-sm bg-neon-panel border-4 border-neon-green rounded-lg p-6 text-center shadow-[0_0_40px_rgba(0,255,102,0.3)]">
+                <h3 id="goTitle" class="text-xl mb-3 font-bold tracking-wider">GAME OVER</h3>
+                <p id="goReason" class="text-xs text-neon-green/70 mb-4 font-mono"></p>
+                <p class="text-xs mb-6"><span data-i18n="you">YOU</span>: <span id="goPlayer">0</span> &nbsp;|&nbsp; <span data-i18n="bot">BOT</span>: <span id="goBot">0</span></p>
+                <div class="flex gap-3">
+                    <button onclick="playBtnSound(); closeGameOver(); leaveGame();" class="btn-retro flex-1 py-3 text-xs" data-i18n="btnBackText">MAIN MENU</button>
+                    <button onclick="playBtnSound(); closeGameOver(); startRound();" class="btn-retro flex-1 py-3 text-xs bg-neon-green text-neon-bg font-bold" data-i18n="again">PLAY AGAIN</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. QUIT MODAL -->
+        <div id="quitModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <div class="w-full max-w-sm bg-neon-panel border-4 border-red-500 rounded-lg p-6 text-center shadow-[0_0_40px_rgba(255,51,51,0.3)]">
+                <h3 id="quitTitle" class="text-red-500 text-lg mb-4 font-bold tracking-wider">QUIT GAME?</h3>
+                <p id="quitDesc" class="text-xs text-red-400/80 mb-6 font-mono">Are you sure you want to exit to system?</p>
+                <div class="flex gap-4">
+                    <button id="btnCancelQuit" onclick="playBtnSound(); closeQuitModal();" class="btn-retro flex-1 py-3 text-xs">CANCEL</button>
+                    <button id="btnConfirmQuit" onclick="playBtnSound(); confirmQuit();" class="btn-retro btn-quit flex-1 py-3 text-xs">YES, QUIT</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. GOODBYE -->
+        <div id="goodbyeScreen" class="screen-fade screen-hidden w-full h-full flex flex-col justify-center items-center text-center p-6 bg-neon-panel border-4 border-neon-green rounded-lg shadow-[0_0_40px_rgba(0,255,102,0.3)]">
+            <div class="text-red-500 mb-6 animate-bounce">
+                <svg class="w-20 h-20 fill-current drop-shadow-[0_0_20px_rgba(255,51,51,0.8)]" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+            </div>
+            <h2 id="goodbyeMsg" class="text-xl sm:text-2xl text-neon-green mb-3 tracking-wider font-bold">THANK YOU FOR PLAYING!</h2>
+            <p id="goodbyeSub" class="text-xs text-neon-green/70 font-mono mb-8">Closing game in <span id="closeTimer" class="text-red-500 font-bold text-base">5</span> seconds...</p>
+            <div class="w-48 pixel-progress-container"><div id="closeProgressBar" class="pixel-progress-bar bg-red-500" style="width:100%;transition:width 1s linear;"></div></div>
+        </div>
+    </div>
+
+    <script>
+        // ================= SETTINGS & TRANSLATIONS =================
+        let settings = { lang: 'en', difficulty: 'medium', volume: 80, timer: 15, matrixFx: true };
+
+        const translations = {
+            en: {
+                subTitle: "JAVA EDITION", single: "SINGLE PLAYER", multi: "MULTIPLAYER", settings: "SETTINGS", quit: "QUIT",
+                settingsTitle: "SETTINGS", btnBackText: "MAIN MENU", lblLang: "LANGUAGE", lblDiff: "BOT DIFFICULTY", lblVol: "SFX VOLUME",
+                lblTimer: "TURN TIMER", lblMatrix: "SCANLINES FX", saveBack: "SAVE & BACK", quitTitle: "QUIT GAME?",
+                quitDesc: "Are you sure you want to exit?", cancel: "CANCEL", confirmQuit: "YES, QUIT", goodbyeMsg: "THANK YOU FOR PLAYING!",
+                you: "YOU", bot: "BOT", send: "SEND", again: "PLAY AGAIN", yourTurn: "YOUR TURN", botTurn: "BOT IS THINKING...",
+                placeholder: "type a word...", startAny: "Send any word to start the chain", startWith: "Start with the letter",
+                dictMissing: "en_words.txt could not be loaded automatically", pickFile: "CHOOSE en_words.txt", loadingDict: "Loading words...",
+                loaded: "words loaded", gameOver: "GAME OVER", youWin: "YOU WIN!", youLose: "YOU LOSE",
+                errShort: "Word must be at least 2 letters", errLetters: "English letters only", errStart: "Word must start with",
+                errNotFound: "Word not in dictionary", errUsed: "Word already used",
+                reasonTime: "Time ran out!", reasonBotStuck: "The bot has no word to play!", reasonQuitNoDict: "Dictionary is empty",
+                botSent: "BOT", youSent: "YOU",
+                mpCreate: "CREATE ROOM", mpJoin: "JOIN", mpJoinHint: "ROOM CODE", mpNoConfig: "Firebase is not set up yet. Edit firebase-config.js", yourName: "Your name", roomCode: "ROOM", mpPlayers: "PLAYERS", mpStart: "START GAME",
+                mpWaitHost: "Waiting for the host to start...", mpNeed2: "Need at least 2 players", mpHost: "HOST", mpOut: "is out!", mpWins: "wins!",
+                mpNoServer: "Connection failed. Check the code and your internet, then try again", mpe_noroom: "Room not found", mpe_full: "Room is full",
+                mpe_started: "Game already started", mpe_dict: "Could not load en_words.txt", mpe_need2: "Need at least 2 players",
+                mpe_notturn: "Not your turn", mpe_host: "Only the host can do that"
+            },
+            ar: {
+                subTitle: "نسخة جافا", single: "اللعب الفردي", multi: "اللعب الجماعي", settings: "الإعدادات", quit: "خروج",
+                settingsTitle: "الإعدادات", btnBackText: "القائمة الرئيسية", lblLang: "اللغة", lblDiff: "صعوبة البوت", lblVol: "مستوى الصوت",
+                lblTimer: "وقت الدور", lblMatrix: "تأثير الشاشة", saveBack: "حفظ وعودة", quitTitle: "مغادرة اللعبة؟",
+                quitDesc: "هل أنت متأكد من رغبتك في الخروج؟", cancel: "إلغاء", confirmQuit: "نعم، خروج", goodbyeMsg: "شكراً لكم على اللعب!",
+                you: "أنت", bot: "البوت", send: "إرسال", again: "العب مجدداً", yourTurn: "دورك", botTurn: "البوت يفكر...",
+                placeholder: "اكتب كلمة إنجليزية...", startAny: "أرسل أي كلمة لبدء السلسلة", startWith: "ابدأ بالحرف",
+                dictMissing: "تعذر تحميل ملف en_words.txt تلقائياً", pickFile: "اختر ملف en_words.txt", loadingDict: "جارٍ تحميل الكلمات...",
+                loaded: "كلمة تم تحميلها", gameOver: "انتهت اللعبة", youWin: "فزت!", youLose: "خسرت",
+                errShort: "الكلمة يجب أن تكون حرفين على الأقل", errLetters: "حروف إنجليزية فقط", errStart: "يجب أن تبدأ الكلمة بالحرف",
+                errNotFound: "الكلمة غير موجودة في القاموس", errUsed: "الكلمة مستخدمة من قبل",
+                reasonTime: "انتهى الوقت!", reasonBotStuck: "البوت لم يجد كلمة ليرد بها!", reasonQuitNoDict: "القاموس فارغ",
+                botSent: "البوت", youSent: "أنت",
+                mpCreate: "إنشاء غرفة", mpJoin: "انضمام", mpJoinHint: "كود الغرفة", mpNoConfig: "لم يتم إعداد Firebase بعد. عدّل ملف firebase-config.js", yourName: "اسمك", roomCode: "الغرفة", mpPlayers: "اللاعبون", mpStart: "ابدأ اللعبة",
+                mpWaitHost: "بانتظار المضيف ليبدأ اللعبة...", mpNeed2: "يلزم لاعبان على الأقل", mpHost: "المضيف", mpOut: "خرج من اللعبة!", mpWins: "فاز!",
+                mpNoServer: "تعذر الاتصال. تأكد من الكود والإنترنت وحاول مرة أخرى", mpe_noroom: "الغرفة غير موجودة", mpe_full: "الغرفة ممتلئة",
+                mpe_started: "اللعبة بدأت بالفعل", mpe_dict: "تعذر تحميل en_words.txt", mpe_need2: "يلزم لاعبان على الأقل",
+                mpe_notturn: "ليس دورك", mpe_host: "للمضيف فقط"
+            }
+        };
+        const T = k => translations[settings.lang][k] || k;
+        const $ = id => document.getElementById(id);
+
+        // ================= AUDIO =================
+        let synth = null;
+        function initAudio() {
+            if (!synth) {
+                synth = new Tone.Synth().toDestination();
+                Tone.Destination.volume.value = Tone.gainToDb(Math.max(settings.volume, 1) / 100);
+            }
+        }
+        function beep(note, dur) {
+            try { initAudio(); if (settings.volume > 0) synth.triggerAttackRelease(note, dur || "16n"); } catch (e) {}
+        }
+        function playBtnSound() { beep("C5"); }
+
+        // ================= SETTINGS PERSISTENCE =================
+        function loadSavedSettings() {
+            try {
+                const saved = localStorage.getItem('word_chain_settings');
+                if (saved) settings = { ...settings, ...JSON.parse(saved) };
+            } catch (e) {}
+            applySettingsToUI();
+        }
+        function saveSettingsAndExit() {
+            try { localStorage.setItem('word_chain_settings', JSON.stringify(settings)); } catch (e) {}
+            closeSettings();
+        }
+        function applySettingsToUI() {
+            setLanguage(settings.lang);
+            setDifficulty(settings.difficulty);
+            updateVolume(settings.volume);
+            setTimer(settings.timer);
+            applyScanlines();
+        }
+        function applyScanlines() {
+            $('scanlineOverlay').style.display = settings.matrixFx ? 'block' : 'none';
+            $('btnMatrixToggle').innerText = settings.matrixFx ? 'ON' : 'OFF';
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            loadSavedSettings();
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.floor(Math.random() * 12) + 5;
+                if (progress >= 100) {
+                    progress = 100;
+                    clearInterval(interval);
+                    $('progressBar').style.width = '100%';
+                    $('loadingPercent').innerText = '100%';
+                    $('loadingStatus').innerText = 'READY!';
+                    setTimeout(() => switchScreen('loadingScreen', 'mainMenuScreen'), 500);
+                } else {
+                    $('progressBar').style.width = progress + '%';
+                    $('loadingPercent').innerText = progress + '%';
+                }
+            }, 100);
+
+            $('wordInput').addEventListener('keydown', e => { if (e.key === 'Enter') submitWord(); });
+            $('dictPicker').addEventListener('change', e => {
+                const f = e.target.files[0];
+                if (!f) return;
+                f.text().then(txt => { buildDictionary(txt); if (dictReady) { idbSet('dict', txt).catch(() => {}); $('dictFallback').classList.add('hidden'); startRound(); } });
+            });
+            $('dictFallback').querySelector('label').addEventListener('click', () => $('dictPicker').click());
+        });
+
+        // ================= NAVIGATION =================
+        function switchScreen(fromId, toId) {
+            $(fromId).classList.add('screen-hidden');
+            setTimeout(() => $(toId).classList.remove('screen-hidden'), 150);
+        }
+        function openSettings() { switchScreen('mainMenuScreen', 'settingsScreen'); }
+        function closeSettings() { switchScreen('settingsScreen', 'mainMenuScreen'); }
+
+        function setLanguage(lang) {
+            settings.lang = lang;
+            const t = translations[lang];
+            $('btnLangEn').className = lang === 'en' ? 'btn-retro py-2 px-3 text-center bg-neon-green text-neon-bg font-bold' : 'btn-retro py-2 px-3 text-center opacity-60';
+            $('btnLangAr').className = lang === 'ar' ? 'btn-retro py-2 px-3 text-center bg-neon-green text-neon-bg font-bold' : 'btn-retro py-2 px-3 text-center opacity-60';
+            document.body.classList.toggle('rtl-font', lang === 'ar');
+            document.body.dir = lang === 'ar' ? 'rtl' : 'ltr';
+            document.querySelectorAll('[data-i18n]').forEach(el => { if (t[el.dataset.i18n]) el.innerText = t[el.dataset.i18n]; });
+            ['subTitle', 'btnBackText', 'lblLang', 'lblDiff', 'lblVol', 'lblTimer', 'lblMatrix', 'quitTitle', 'quitDesc', 'goodbyeMsg'].forEach(id => { if ($(id) && t[id]) $(id).innerText = t[id]; });
+            $('btnSaveBack').innerText = t.saveBack;
+            $('btnCancelQuit').innerText = t.cancel;
+            $('btnConfirmQuit').innerText = t.confirmQuit;
+            $('wordInput').placeholder = t.placeholder; $('mpInput').placeholder = t.placeholder; $('mpName').placeholder = t.yourName; $('mpCode').placeholder = t.mpJoinHint;
+            if (typeof mp !== 'undefined' && mp.st) renderMP();
+            if (typeof game !== 'undefined' && game.active) { updateTurnLabel(); updateHint(); }
+        }
+
+        function setDifficulty(diff) {
+            settings.difficulty = diff;
+            ['Easy', 'Med', 'Hard'].forEach(d => {
+                const on = d.toLowerCase() === diff || (diff === 'medium' && d === 'Med');
+                $(`btnDiff${d}`).className = 'btn-retro py-2 text-center' + (on ? ' bg-neon-green text-neon-bg font-bold' : ' opacity-60');
+            });
+            $('diffBadge').innerText = diff.toUpperCase();
+        }
+        function updateVolume(val) {
+            settings.volume = Number(val);
+            $('volVal').innerText = val + '%';
+            $('volSlider').value = val;
+            if (synth) Tone.Destination.volume.value = Tone.gainToDb(Math.max(val, 1) / 100);
+        }
+        function setTimer(sec) {
+            settings.timer = sec;
+            [10, 15, 20].forEach(s => {
+                $(`btnTimer${s}`).className = 'btn-retro py-2 text-center' + (s === sec ? ' bg-neon-green text-neon-bg font-bold' : ' opacity-60');
+            });
+        }
+        function toggleMatrix() { settings.matrixFx = !settings.matrixFx; applyScanlines(); }
+
+        function openQuitModal() { $('quitModal').classList.remove('hidden'); }
+        function closeQuitModal() { $('quitModal').classList.add('hidden'); }
+        function confirmQuit() {
+            closeQuitModal();
+            switchScreen('mainMenuScreen', 'goodbyeScreen');
+            let timeLeft = 5;
+            const countdown = setInterval(() => {
+                timeLeft--;
+                $('closeTimer').innerText = timeLeft;
+                $('closeProgressBar').style.width = (timeLeft * 20) + '%';
+                if (timeLeft <= 0) { clearInterval(countdown); fetch('/api/quit').catch(() => {}); window.close(); }
+            }, 1000);
+        }
+
+        // ================= DICTIONARY =================
+        let wordSet = new Set();
+        let byLetter = {};      // letter -> array of words
+        let dictReady = false;
+        let dictLoading = false;
+
+        function buildDictionary(text) {
+            const words = text.split(/\s+/).map(w => w.trim().toLowerCase()).filter(w => /^[a-z]{2,}$/.test(w));
+            wordSet = new Set(words);
+            byLetter = {};
+            wordSet.forEach(w => { (byLetter[w[0]] = byLetter[w[0]] || []).push(w); });
+            dictReady = wordSet.size > 0;
+        }
+
+        // Cache (IndexedDB) so a manually picked file is remembered next time
+        function idbOpen() { return new Promise((res, rej) => { const r = indexedDB.open('wordchain', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+        async function idbGet(k) { const db = await idbOpen(); return new Promise((res, rej) => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+        async function idbSet(k, v) { const db = await idbOpen(); return new Promise((res, rej) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); }); }
+        function loadScript(src) { return new Promise(res => { const s = document.createElement('script'); s.src = src; s.onload = () => res(true); s.onerror = () => res(false); document.head.appendChild(s); }); }
+
+        async function loadDictionary() {
+            if (dictReady || dictLoading) return;
+            dictLoading = true;
+            /*ELECTRON-DICT*/
+            if (window.gameAPI && window.gameAPI.getWords) {
+                try { const txt = await window.gameAPI.getWords(); if (txt) buildDictionary(txt); }
+                catch (e) { console.error('Electron dict load failed', e); }
+            }
+            // 1) en_words.txt next to index.html (works when served over http, e.g. via run.py)
+            for (const name of ['en_words.txt', 'en_words']) {
+                try {
+                    const res = await fetch(name);
+                    if (res.ok) { buildDictionary(await res.text()); if (dictReady) break; }
+                } catch (e) { /* file:// blocks fetch */ }
+            }
+            // 2) en_words.js next to index.html (works even from file://)
+            if (!dictReady && await loadScript('en_words.js') && window.EN_WORDS) buildDictionary(window.EN_WORDS);
+            // 3) copy remembered from a previous manual pick
+            if (!dictReady) { try { const c = await idbGet('dict'); if (c) buildDictionary(c); } catch (e) {} }
+            dictLoading = false;
+        }
+
+        // ================= GAME STATE =================
+        const game = { active: false, turn: 'player', used: new Set(), last: null, pScore: 0, bScore: 0, combo: 0, timeLeft: 0, ticker: null, botTimeout: null };
+
+        async function startSingle() {
+            switchScreen('mainMenuScreen', 'gameScreen');
+            $('hintLine').innerText = T('loadingDict');
+            $('wordInput').disabled = true; $('sendBtn').disabled = true;
+            await loadDictionary();
+            if (!dictReady) {
+                $('hintLine').innerText = '';
+                $('dictFallback').classList.remove('hidden');
+                return;
+            }
+            $('dictFallback').classList.add('hidden');
+            startRound();
+        }
+
+        function startRound() {
+            stopTimers();
+            game.active = true;
+            game.turn = 'player';
+            game.used = new Set();
+            game.last = null;
+            game.pScore = 0; game.bScore = 0; game.combo = 0;
+            $('chatBox').innerHTML = '';
+            updateScores();
+            addBubble('sys', wordSet.size.toLocaleString() + ' ' + T('loaded'));
+            beginPlayerTurn();
+        }
+
+        function leaveGame() {
+            stopTimers();
+            game.active = false;
+            switchScreen('gameScreen', 'mainMenuScreen');
+        }
+
+        function stopTimers() {
+            clearInterval(game.ticker);
+            clearTimeout(game.botTimeout);
+        }
+
+        function updateScores() {
+            $('scorePlayer').innerText = game.pScore;
+            $('scoreBot').innerText = game.bScore;
+            $('comboBadge').innerText = game.combo > 0 ? 'COMBO x' + comboMult().toFixed(2) : '';
+        }
+
+        // ---- Scoring ----
+        // base: 10 per letter | speed: up to +40 for answering fast (player only)
+        // trap: bonus for ending on a letter with few words left | combo: consecutive fast answers (x1.25 .. x2.0)
+        const comboMult = () => 1 + 0.25 * Math.min(game.combo, 4);
+        function trapBonus(word) {
+            const l = word[word.length - 1];
+            const left = (byLetter[l] || []).reduce((n, w) => n + (game.used.has(w) ? 0 : 1), 0);
+            return left < 50 ? 40 : left < 500 ? 20 : 0;
+        }
+
+        function updateTurnLabel() {
+            $('turnLabel').innerText = game.turn === 'player' ? T('yourTurn') : T('botTurn');
+        }
+
+        function updateHint() {
+            const el = $('hintLine');
+            if (game.turn !== 'player') { el.innerHTML = ''; return; }
+            el.innerHTML = game.last
+                ? `${T('startWith')} <span class="last-letter text-base">${game.last.toUpperCase()}</span>`
+                : T('startAny');
+        }
+
+        function addBubble(type, text, pts, who, boxId) {
+            const box = $(boxId || 'chatBox');
+            const d = document.createElement('div');
+            if (type === 'sys') {
+                d.className = 'bubble bubble-sys';
+                d.textContent = text;
+            } else {
+                d.className = 'bubble bubble-' + type;
+                const label = document.createElement('small');
+                label.textContent = who || (type === 'player' ? T('youSent') : T('botSent'));
+                const span = document.createElement('span');
+                span.textContent = text.slice(0, -1);
+                const lastCh = document.createElement('span');
+                lastCh.className = 'last-letter';
+                lastCh.textContent = text.slice(-1);
+                d.append(label, span, lastCh);
+                if (pts) { const p = document.createElement('small'); p.style.cssText = 'margin:6px 0 0;opacity:1;color:#FFCC33'; p.textContent = '+' + pts; d.append(p); }
+            }
+            box.appendChild(d);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        // ---- Player turn ----
+        function beginPlayerTurn() {
+            game.turn = 'player';
+            updateTurnLabel(); updateHint();
+            $('wordInput').disabled = false; $('sendBtn').disabled = false;
+            $('wordInput').value = '';
+            $('wordInput').focus();
+            startTimer();
+        }
+
+        function startTimer() {
+            clearInterval(game.ticker);
+            const total = settings.timer * 1000;
+            const startAt = performance.now();
+            const bar = $('timerBar');
+            bar.classList.remove('timer-warn');
+            let lastSecond = null;
+            game.ticker = setInterval(() => {
+                const left = Math.max(0, total - (performance.now() - startAt));
+                game.timeLeft = left / 1000;
+                bar.style.width = (left / total * 100) + '%';
+                const sec = Math.ceil(left / 1000);
+                $('timerText').innerText = sec + 's';
+                bar.classList.toggle('timer-warn', sec <= 3);
+                if (sec <= 3 && sec !== lastSecond && sec > 0) beep("A4", "32n");
+                lastSecond = sec;
+                if (left <= 0) { clearInterval(game.ticker); endGame(false, T('reasonTime')); }
+            }, 100);
+        }
+
+        function showError(msg) {
+            const inp = $('wordInput');
+            $('hintLine').innerHTML = `<span style="color:#FF3333">${msg}</span>`;
+            inp.classList.remove('shake'); void inp.offsetWidth; inp.classList.add('shake');
+            beep("C3", "8n");
+            setTimeout(() => { if (game.active && game.turn === 'player') updateHint(); }, 1800);
+        }
+
+        function submitWord() {
+            if (!game.active || game.turn !== 'player') return;
+            const w = $('wordInput').value.trim().toLowerCase();
+            if (!w) return;
+            if (!/^[a-z]+$/.test(w)) return showError(T('errLetters'));
+            if (w.length < 2) return showError(T('errShort'));
+            if (game.last && w[0] !== game.last) return showError(`${T('errStart')} ${game.last.toUpperCase()}`);
+            if (game.used.has(w)) return showError(T('errUsed'));
+            if (!wordSet.has(w)) return showError(T('errNotFound'));
+
+            // Accepted
+            clearInterval(game.ticker);
+            game.used.add(w);
+            game.last = w[w.length - 1];
+            const frac = game.timeLeft / settings.timer;
+            game.combo = frac >= 0.5 ? game.combo + 1 : 0;
+            const pts = Math.round((w.length * 10 + Math.round(frac * 40) + trapBonus(w)) * comboMult());
+            game.pScore += pts;
+            updateScores();
+            addBubble('player', w, pts);
+            beep("E5");
+            $('wordInput').value = '';
+            $('wordInput').disabled = true; $('sendBtn').disabled = true;
+            botTurn();
+        }
+
+        // ---- Bot turn ----
+        function pickBotWord() {
+            const pool = (byLetter[game.last] || []).filter(w => !game.used.has(w));
+            if (!pool.length) return null;
+            const sample = n => { const out = []; for (let i = 0; i < Math.min(n, pool.length); i++) out.push(pool[Math.floor(Math.random() * pool.length)]); return out; };
+            const diff = settings.difficulty;
+            if (diff === 'easy') {
+                return sample(20).sort((a, b) => a.length - b.length)[0];
+            }
+            if (diff === 'hard') {
+                // prefer long words ending in a letter with few continuations
+                const left = l => (byLetter[l] || []).length;
+                return sample(300).sort((a, b) => (left(a.slice(-1)) - left(b.slice(-1))) || (b.length - a.length))[0];
+            }
+            return pool[Math.floor(Math.random() * pool.length)];
+        }
+
+        function botTurn() {
+            game.turn = 'bot';
+            updateTurnLabel(); updateHint();
+            $('timerBar').style.width = '100%';
+            $('timerBar').classList.remove('timer-warn');
+            $('timerText').innerText = '...';
+            const delay = { easy: 1800, medium: 1200, hard: 700 }[settings.difficulty] + Math.random() * 600;
+            game.botTimeout = setTimeout(() => {
+                if (!game.active) return;
+                const w = pickBotWord();
+                if (!w) { game.pScore += 100; updateScores(); return endGame(true, T('reasonBotStuck') + ' +100'); }
+                game.used.add(w);
+                game.last = w[w.length - 1];
+                const bpts = w.length * 10 + trapBonus(w);
+                game.bScore += bpts;
+                updateScores();
+                addBubble('bot', w, bpts);
+                beep("G4");
+                beginPlayerTurn();
+            }, delay);
+        }
+
+        // ---- Game over ----
+        function endGame(playerWon, reason) {
+            stopTimers();
+            game.active = false;
+            $('wordInput').disabled = true; $('sendBtn').disabled = true;
+            const title = $('goTitle');
+            title.innerText = playerWon ? T('youWin') : T('youLose');
+            title.style.color = playerWon ? '#00FF66' : '#FF3333';
+            $('goReason').innerText = reason;
+            $('goPlayer').innerText = game.pScore;
+            $('goBot').innerText = game.bScore;
+            beep(playerWon ? "C6" : "C3", "8n");
+            $('gameOverModal').classList.remove('hidden');
+        }
+        function closeGameOver() { $('gameOverModal').classList.add('hidden'); }
+
+        // ================= ONLINE MULTIPLAYER =================
+        const mp = { room: null, pid: null, st: null, pollId: null, timerId: null, recvAt: 0, shown: 0, lastOut: -1, overSeen: false, wasMyTurn: false, hintLock: false, lastSec: 0 };
+
+        // P2P-BEGIN
+        // Firebase Realtime Database transport. The room creator's browser is the game "server" (host logic below):
+        // guests send requests to rooms/CODE/req, and everybody reads the shared state from rooms/CODE/state.
+        const fb = { db: null, code: null, isHost: false, state: null, recv: 0, seen: false, reqRef: null, stRef: null };
+        const HR = { room: null };
+
+        function fbInit() {
+            if (fb.db) return true;
+            const c = window.FIREBASE_CONFIG;
+            if (typeof firebase === 'undefined' || !c || !c.databaseURL || /YOUR/i.test(String(c.databaseURL) + String(c.apiKey))) return false;
+            firebase.initializeApp(c);
+            fb.db = firebase.database();
+            return true;
+        }
+        const randCode = () => { const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; let r = ''; for (let i = 0; i < 4; i++) r += c[Math.floor(Math.random() * c.length)]; return r; };
+        const perr = (err, arg) => arg === undefined ? { ok: false, err } : { ok: false, err, arg };
+        const cleanName = n => String(n || '').replace(/[^\p{L}\p{N} _-]/gu, '').trim().slice(0, 12) || 'Player';
+        const toArr = x => Array.isArray(x) ? x : (x ? Object.values(x) : []);
+
+        function normState(raw, pid) {
+            const s = Object.assign({}, raw);
+            s.ok = true; s.me = pid; s.last = raw.last || '';
+            s.players = toArr(raw.players); s.history = toArr(raw.history);
+            s.remaining = Math.max(0, (raw.remaining || 0) - (performance.now() - fb.recv));
+            return s;
+        }
+
+        async function api(act, params) {
+            params = params || {};
+            if (fb.isHost) return hostApiPub(act, params);
+            if (act === 'state') return fb.state ? normState(fb.state, Number(params.pid)) : perr('noroom');
+            return new Promise((resolve, reject) => {
+                const reqRef = fb.db.ref('rooms/' + fb.code + '/req').push();
+                const resRef = fb.db.ref('rooms/' + fb.code + '/res/' + reqRef.key);
+                const t = setTimeout(() => { resRef.off(); reject(new Error('timeout')); }, 8000);
+                resRef.on('value', snap => {
+                    if (!snap.exists()) return;
+                    const val = snap.val();
+                    clearTimeout(t); resRef.off(); resRef.remove();
+                    resolve(JSON.parse(val));
+                });
+                reqRef.set({ act, params: JSON.stringify(params) });
+            });
+        }
+
+        async function p2pCreate(name) {
+            if (!fbInit()) throw new Error('config');
+            await loadDictionary();
+            if (!dictReady) return perr('dict');
+            let code = '';
+            for (let i = 0; i < 8 && !code; i++) {
+                const c = randCode();
+                const snap = await fb.db.ref('rooms/' + c).once('value');
+                if (!snap.exists()) code = c;
+            }
+            if (!code) throw new Error('no code');
+            const roomRef = fb.db.ref('rooms/' + code);
+            await roomRef.set({ created: Date.now() });
+            roomRef.onDisconnect().remove();                       // room disappears if the host closes the page
+            HR.room = { code, players: [], nextId: 0, status: 'lobby', turn: 0, last: '', turnEnds: 0, turnMs: 15000, used: new Set(), history: [], winner: -1, out: -1, ver: 0, pub: -1 };
+            hostAdd(HR.room, name);
+            fb.code = code; fb.isHost = true;
+            fb.reqRef = roomRef.child('req');
+            fb.reqRef.on('child_added', snap => {
+                const v = snap.val() || {};
+                let res;
+                try { res = hostApiPub(v.act, JSON.parse(v.params || '{}')); } catch (e) { res = perr('server'); }
+                fb.db.ref('rooms/' + code + '/res/' + snap.key).set(JSON.stringify(res));
+                snap.ref.remove();
+            });
+            HR.room.pub = HR.room.ver; fbPublish(HR.room);
+            return { ok: true, room: code, pid: 0 };
+        }
+        async function p2pJoin(code, name) {
+            if (!fbInit()) throw new Error('config');
+            if (!/^[A-Z]{4}$/.test(code)) return perr('noroom');
+            const stRef = fb.db.ref('rooms/' + code + '/state');
+            const first = await stRef.once('value');
+            if (!first.exists()) return perr('noroom');
+            fb.code = code; fb.isHost = false; fb.state = null; fb.seen = false; fb.stRef = stRef;
+            stRef.on('value', snap => {
+                if (snap.exists()) { fb.state = snap.val(); fb.recv = performance.now(); fb.seen = true; }
+                else if (fb.seen) mpRoomClosed();
+            });
+            const r = await api('join', { name, room: code });
+            if (!r.ok) fbClose();
+            return r;
+        }
+        function fbClose() {
+            try {
+                if (fb.db && fb.code) {
+                    const rr = fb.db.ref('rooms/' + fb.code);
+                    if (fb.isHost) { if (fb.reqRef) fb.reqRef.off(); rr.onDisconnect().cancel(); rr.remove(); }
+                    else if (fb.stRef) fb.stRef.off();
+                }
+            } catch (e) {}
+            fb.code = null; fb.isHost = false; fb.state = null; fb.seen = false; fb.reqRef = null; fb.stRef = null; HR.room = null;
+        }
+
+        // ---- host-side game logic ----
+        function hostAdd(r, name) { const pl = { id: r.nextId++, name: cleanName(name), score: 0, combo: 0, alive: true, left: false }; r.players.push(pl); return pl; }
+        const hostOf = r => r.players.find(p => !p.left) || r.players[0];
+        function hostTrap(r, c) {
+            const left = (byLetter[c] || []).reduce((n, w) => n + (r.used.has(w) ? 0 : 1), 0);
+            return left < 50 ? 40 : left < 500 ? 20 : 0;
+        }
+        function hostNext(r, now) {
+            do { r.turn = (r.turn + 1) % r.players.length; } while (!r.players[r.turn].alive);
+            r.turnEnds = now + r.turnMs;
+        }
+        function hostEliminate(r, idx, now) {
+            r.ver++;
+            const p = r.players[idx]; p.alive = false; r.out = p.id;
+            const alive = r.players.filter(x => x.alive);
+            if (alive.length <= 1) { r.status = 'over'; r.winner = alive.length ? alive[0].id : -1; return; }
+            if (idx === r.turn) hostNext(r, now);
+        }
+        function hostTick(r, now) { if (r.status === 'playing' && now > r.turnEnds) hostEliminate(r, r.turn, now); }
+        function hostReset(r) {
+            r.status = 'lobby'; r.turn = 0; r.last = ''; r.winner = -1; r.out = -1; r.used.clear(); r.history = [];
+            r.players.forEach(x => { x.score = 0; x.combo = 0; x.alive = true; });
+        }
+        function hostState(r, me, now) {
+            const playing = r.status === 'playing';
+            return {
+                ok: true, status: r.status, me: me.id, host: hostOf(r).id,
+                turnId: playing ? r.players[r.turn].id : -1, last: r.last,
+                remaining: playing ? Math.max(0, r.turnEnds - now) : 0, turnMs: r.turnMs, winner: r.winner, out: r.out,
+                players: r.players.filter(x => !(x.left && r.status === 'lobby')).map(x => ({ id: x.id, name: x.name, score: x.score, combo: x.combo, alive: x.alive })),
+                history: r.history
+            };
+        }
+        function hostApi(act, p) {
+            const r = HR.room, now = Date.now();
+            if (!r) return perr('noroom');
+            if (act !== 'state') r.ver++;
+            if (act === 'join') {
+                if (String(p.room || '').toUpperCase() !== r.code) return perr('noroom');
+                if (r.status !== 'lobby') return perr('started');
+                if (r.players.length >= 4) return perr('full');
+                return { ok: true, room: r.code, pid: hostAdd(r, p.name).id };
+            }
+            const me = r.players.find(x => x.id === Number(p.pid));
+            if (!me) return perr('noroom');
+            if (act === 'state') { hostTick(r, now); return hostState(r, me, now); }
+            if (act === 'start') {
+                if (hostOf(r) !== me) return perr('host');
+                if (r.status !== 'lobby') return perr('started');
+                if (r.players.length < 2) return perr('need2');
+                let t = parseInt(p.t, 10); if (!(t >= 5 && t <= 60)) t = 15;
+                hostReset(r); r.turnMs = t * 1000; r.status = 'playing'; r.turnEnds = now + r.turnMs;
+                return { ok: true };
+            }
+            if (act === 'again') {
+                if (hostOf(r) !== me) return perr('host');
+                if (r.status === 'over') { r.players = r.players.filter(x => !x.left); hostReset(r); }
+                return { ok: true };
+            }
+            if (act === 'leave') {
+                if (r.status === 'playing') { me.left = true; if (me.alive) hostEliminate(r, r.players.indexOf(me), now); }
+                else r.players.splice(r.players.indexOf(me), 1);
+                return { ok: true };
+            }
+            if (act === 'word') {
+                hostTick(r, now);
+                if (r.status !== 'playing' || r.players[r.turn] !== me) return perr('notturn');
+                const w = String(p.w || '').trim().toLowerCase();
+                if (!/^[a-z]+$/.test(w)) return perr('letters');
+                if (w.length < 2) return perr('short');
+                if (r.last && w[0] !== r.last) return perr('start', r.last);
+                if (r.used.has(w)) return perr('used');
+                if (!wordSet.has(w)) return perr('notfound');
+                const frac = Math.max(0, Math.min(1, (r.turnEnds - now) / r.turnMs));
+                me.combo = frac >= 0.5 ? me.combo + 1 : 0;
+                r.used.add(w); r.last = w[w.length - 1];
+                const pts = Math.round((w.length * 10 + Math.round(frac * 40) + hostTrap(r, r.last)) * (1 + 0.25 * Math.min(me.combo, 4)));
+                me.score += pts;
+                r.history.push({ id: me.id, w, pts });
+                hostNext(r, now);
+                return { ok: true };
+            }
+            return perr('bad');
+        }
+        function fbPublish(r) {
+            const st = hostState(r, { id: -1 }, Date.now());
+            st.ver = r.ver;
+            fb.db.ref('rooms/' + r.code + '/state').set(JSON.parse(JSON.stringify(st))).catch(() => {});
+        }
+        function hostApiPub(act, p) {
+            const res = hostApi(act, p);
+            const r = HR.room;
+            if (r && r.ver !== r.pub) { r.pub = r.ver; fbPublish(r); }
+            return res;
+        }
+        // P2P-END
+
+        function mpRoomClosed() {
+            if (!mp.room) return;
+            mpStop(); $('mpErr').innerText = T('mpe_noroom'); switchScreen('mpScreen', 'mpMenuScreen');
+        }
+        function openMP() {
+            try { $('mpName').value = localStorage.getItem('wc_name') || ''; } catch (e) {}
+            $('mpErr').innerText = '';
+            switchScreen('mainMenuScreen', 'mpMenuScreen');
+        }
+        async function mpEnter(act, extra) {
+            const name = $('mpName').value.trim() || 'Player';
+            try { localStorage.setItem('wc_name', name); } catch (e) {}
+            let res;
+            $('mpErr').innerText = '...';
+            try { res = act === 'create' ? await p2pCreate(name) : await p2pJoin(String((extra && extra.room) || '').trim().toUpperCase(), name); }
+            catch (e) { $('mpErr').innerText = T(e && e.message === 'config' ? 'mpNoConfig' : 'mpNoServer'); return; }
+            $('mpErr').innerText = '';
+            if (!res.ok) { $('mpErr').innerText = T('mpe_' + res.err); return; }
+            mp.room = res.room; mp.pid = res.pid; mp.st = null; mp.shown = 0; mp.lastOut = -1; mp.overSeen = false;
+            $('mpRoomCode').innerText = res.room;
+            $('mpChat').innerHTML = '';
+            $('mpLobby').classList.remove('hidden'); $('mpPlay').classList.add('hidden');
+            switchScreen('mpMenuScreen', 'mpScreen');
+            mp.pollId = setInterval(mpPoll, 500);
+            mp.timerId = setInterval(mpDrawTimer, 100);
+            mpPoll();
+        }
+        function mpStop() {
+            clearInterval(mp.pollId); clearInterval(mp.timerId); mp.room = null; mp.st = null;
+            fbClose();
+        }
+        function mpLeave() {
+            if (mp.room) api('leave', { room: mp.room, pid: mp.pid }).catch(() => {});
+            mpStop();
+            switchScreen('mpScreen', 'mainMenuScreen');
+        }
+        async function mpPoll() {
+            if (!mp.room) return;
+            let s;
+            try { s = await api('state', { room: mp.room, pid: mp.pid }); } catch (e) { return; }
+            if (!mp.room) return;
+            if (!s.ok) { mpStop(); $('mpErr').innerText = T('mpe_noroom'); switchScreen('mpScreen', 'mpMenuScreen'); return; }
+            mp.st = s; mp.recvAt = performance.now();
+            renderMP();
+        }
+        async function mpStart() {
+            const r = await api('start', { room: mp.room, pid: mp.pid, t: settings.timer }).catch(() => null);
+            if (r && !r.ok) $('mpWait').innerText = T('mpe_' + r.err);
+            mpPoll();
+        }
+        async function mpAgain() { await api('again', { room: mp.room, pid: mp.pid }).catch(() => {}); mpPoll(); }
+
+        function mpName(s, id) { const p = s.players.find(x => x.id === id); return p ? p.name : '?'; }
+
+        function renderMP() {
+            const s = mp.st, lobby = s.status === 'lobby', over = s.status === 'over', isHost = s.host === s.me;
+            $('mpLobby').classList.toggle('hidden', !lobby);
+            $('mpPlay').classList.toggle('hidden', lobby);
+            if (lobby) {
+                mp.shown = 0; mp.lastOut = -1; mp.overSeen = false; $('mpChat').innerHTML = '';
+                const list = $('mpList'); list.innerHTML = '';
+                s.players.forEach(p => {
+                    const d = document.createElement('div'); d.className = 'border-2 border-neon-green p-3 text-xs flex justify-between gap-2';
+                    const a = document.createElement('span'); a.textContent = p.name + (p.id === s.me ? ' (' + T('you') + ')' : '');
+                    const b = document.createElement('span'); b.className = 'text-neon-green/60'; b.textContent = p.id === s.host ? T('mpHost') : '';
+                    d.append(a, b); list.appendChild(d);
+                });
+                $('mpStartBtn').classList.toggle('hidden', !isHost);
+                $('mpStartBtn').disabled = s.players.length < 2;
+                $('mpWait').innerText = isHost ? (s.players.length < 2 ? T('mpNeed2') : '') : T('mpWaitHost');
+                return;
+            }
+            // scoreboard
+            const box = $('mpScores'); box.innerHTML = '';
+            s.players.forEach(p => {
+                const d = document.createElement('div'); d.className = 'border-2 p-2';
+                d.style.borderColor = (s.status === 'playing' && p.id === s.turnId) ? '#FFCC33' : (p.id === s.me ? '#00FF66' : '#33CCFF');
+                if (!p.alive) d.style.opacity = '.35';
+                const n = document.createElement('div'); n.className = 'mb-1 truncate'; n.textContent = (p.alive ? '' : '✖ ') + p.name + (p.id === s.me ? ' (' + T('you') + ')' : '');
+                const sc = document.createElement('div'); sc.className = 'text-sm';
+                sc.textContent = p.score + (p.combo > 0 && p.alive ? '  x' + (1 + 0.25 * Math.min(p.combo, 4)).toFixed(2) : '');
+                d.append(n, sc); box.appendChild(d);
+            });
+            // words
+            if (s.history.length < mp.shown) { $('mpChat').innerHTML = ''; mp.shown = 0; }
+            for (let i = mp.shown; i < s.history.length; i++) {
+                const h = s.history[i], mine = h.id === s.me;
+                addBubble(mine ? 'player' : 'bot', h.w, h.pts, mpName(s, h.id), 'mpChat');
+                if (!mine) beep("G4");
+            }
+            mp.shown = s.history.length;
+            if (s.out !== -1 && s.out !== mp.lastOut) { mp.lastOut = s.out; addBubble('sys', mpName(s, s.out) + ' ' + T('mpOut'), null, null, 'mpChat'); beep("C3", "8n"); }
+            // turn / input
+            const myTurn = s.status === 'playing' && s.turnId === s.me;
+            $('mpTurnLabel').innerText = over ? '' : (myTurn ? T('yourTurn') : mpName(s, s.turnId) + ' ...');
+            $('mpInput').disabled = !myTurn; $('mpSend').disabled = !myTurn;
+            if (myTurn && !mp.wasMyTurn) { $('mpInput').value = ''; $('mpInput').focus(); beep("C5", "32n"); }
+            mp.wasMyTurn = myTurn;
+            if (!mp.hintLock) $('mpHint').innerHTML = s.status === 'playing' ? (s.last ? T('startWith') + ' <span class="last-letter text-base">' + s.last.toUpperCase() + '</span>' : T('startAny')) : '';
+            $('mpInputRow').classList.toggle('hidden', over);
+            $('mpOver').classList.toggle('hidden', !over);
+            if (over && !mp.overSeen) {
+                mp.overSeen = true;
+                beep(s.winner === s.me ? "C6" : "C3", "8n");
+                const ov = $('mpOver'); ov.innerHTML = '';
+                const t = document.createElement('div'); t.className = 'text-sm mb-3';
+                t.style.color = s.winner === s.me ? '#00FF66' : '#FFCC33';
+                t.textContent = s.winner === s.me ? T('youWin') : (s.winner >= 0 ? mpName(s, s.winner) + ' ' + T('mpWins') : T('gameOver'));
+                ov.appendChild(t);
+                [...s.players].sort((a, b) => b.score - a.score).forEach((p, i) => {
+                    const r = document.createElement('div'); r.className = 'text-[10px] mb-1'; r.textContent = (i + 1) + '. ' + p.name + ' — ' + p.score; ov.appendChild(r);
+                });
+                const row = document.createElement('div'); row.className = 'flex gap-2 mt-3';
+                const b1 = document.createElement('button'); b1.className = 'btn-retro flex-1 py-2 text-[10px]'; b1.textContent = T('btnBackText'); b1.onclick = () => { playBtnSound(); mpLeave(); };
+                row.appendChild(b1);
+                if (isHost) { const b2 = document.createElement('button'); b2.className = 'btn-retro flex-1 py-2 text-[10px] bg-neon-green text-neon-bg font-bold'; b2.textContent = T('again'); b2.onclick = () => { playBtnSound(); mpAgain(); }; row.appendChild(b2); }
+                else { const w = document.createElement('div'); w.className = 'flex-1 text-[9px] text-neon-green/60 self-center'; w.textContent = T('mpWaitHost'); row.appendChild(w); }
+                ov.appendChild(row);
+            }
+        }
+
+        function mpDrawTimer() {
+            const s = mp.st;
+            if (!s || s.status !== 'playing') return;
+            const rem = Math.max(0, s.remaining - (performance.now() - mp.recvAt));
+            const bar = $('mpTimerBar');
+            bar.style.width = (rem / s.turnMs * 100) + '%';
+            const sec = Math.ceil(rem / 1000);
+            $('mpTimerText').innerText = sec + 's';
+            bar.classList.toggle('timer-warn', sec <= 3);
+            if (sec <= 3 && sec > 0 && sec !== mp.lastSec && s.turnId === s.me) beep("A4", "32n");
+            mp.lastSec = sec;
+        }
+
+        function mpShowError(r) {
+            const map = { letters: T('errLetters'), short: T('errShort'), used: T('errUsed'), notfound: T('errNotFound'), notturn: T('mpe_notturn'), start: T('errStart') + ' ' + String(r.arg || '').toUpperCase() };
+            const inp = $('mpInput');
+            mp.hintLock = true;
+            $('mpHint').innerHTML = '<span style="color:#FF3333"></span>';
+            $('mpHint').firstChild.textContent = map[r.err] || r.err;
+            inp.classList.remove('shake'); void inp.offsetWidth; inp.classList.add('shake');
+            beep("C3", "8n");
+            setTimeout(() => { mp.hintLock = false; if (mp.st) renderMP(); }, 1800);
+        }
+        async function mpSubmit() {
+            const s = mp.st;
+            if (!s || s.status !== 'playing' || s.turnId !== s.me) return;
+            const w = $('mpInput').value.trim().toLowerCase();
+            if (!w) return;
+            let r;
+            try { r = await api('word', { room: mp.room, pid: mp.pid, w }); } catch (e) { return; }
+            if (!r.ok) return mpShowError(r);
+            $('mpInput').value = ''; beep("E5");
+            mpPoll();
+        }
+        $('mpInput').addEventListener('keydown', e => { if (e.key === 'Enter') mpSubmit(); });
+
+        if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('service-worker.js').catch(() => {});
+    </script>
+</body>
+</html>
