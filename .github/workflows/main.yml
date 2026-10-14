@@ -1,0 +1,30 @@
+name: Build Linux (AppImage + Arch pkg.tar.zst)
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Tools needed for the pacman target
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools zstd
+      - name: Install dependencies
+        run: npm install
+      - name: Build AppImage and pacman package
+        run: npx electron-builder --linux AppImage pacman
+      - name: List output
+        run: ls -la dist
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: word-challenge-linux
+          path: |
+            dist/*.AppImage
+            dist/*.pkg.tar.zst
+            dist/*.pacman
+          if-no-files-found: error
